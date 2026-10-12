@@ -271,6 +271,270 @@ etable(
 )
 
 
+# Table 2 -----------------------------------------------------------------
+
+
+## Column 1 / 2
+df_data_proc <- read_delim('merchant_processed_data_for_tbl_2.csv')
+
+
+### creating features for regression
+df_data_proc$pre_base <- ifelse((df_data_proc$dist %in% c(-7,-6)) , 1, 0)
+df_data_proc$post_base <- ifelse(df_data_proc$dist %in% c(-5,-4,-3,-2,-1,0,1,2,3,4,5,6,7,8,9,10), 1, 0)
+
+
+df_data_proc$pre <- ifelse((df_data_proc$dist %in% c(-7,-6)) , 1, 0)
+df_data_proc$post_prep <- ifelse((df_data_proc$dist %in% c(-5,-4,-3,-2)), 1, 0)
+df_data_proc$post_during <- ifelse((df_data_proc$dist %in% c(-1,0,1,2)), 1, 0)
+df_data_proc$post_recovery <- ifelse(df_data_proc$dist %in% c(3,4,5,6,7,8,9,10), 1, 0)
+
+### a list that will contain the results for different columns
+pre_post_results <- list()
+pre_during_post_results <- list()
+
+
+pre_post_results <- list()
+pre_during_post_results <- list()
+
+df_county <- read_csv('zip-county-damage.csv')
+
+#### evacuation 
+df_data_proc_f <- df_data_proc %>%
+  left_join(df_county %>% select(storm_name_fx,zip_code,group=evac_order) %>% unique()) %>%
+  mutate(
+    group_cat = case_when(
+      (is.na(group) & inside_polygon=='NULL') ~ '0',
+      (is.na(group) & inside_polygon=='affected') ~ 'No-evacuation',
+      TRUE ~ group
+    ),
+    group = case_when(
+      (is.na(group) & inside_polygon=='affected') ~ 'No-evacuation',
+      group == 'None' ~ 'No-evacuation',
+      TRUE ~ group
+    ),
+    dist = case_when(
+      is.na(group) ~ 0,
+      (!is.na(group) & (inside_polygon!='NULL')) ~ dist,
+      TRUE ~ dist_all_proc
+    ),
+    group_cat = as.character(group_cat)
+  ) 
+
+for (i in c("No-evacuation","Voluntary","Mandatory")){
+  
+  name <- paste(i)
+  
+  print(name)
+  
+  df_temp <- df_data_proc_f %>%
+    filter(
+      group %in% c(NA,i)
+    )
+  
+  model_pre_post <- feglm(
+    log_tot_spend ~  pre_base + post_base,
+    data = df_temp,
+    fixef = c("new_id", "local_txn_date"),
+    cluster = c('zip_code','local_txn_date'),
+    mem.clean=TRUE
+  )
+  
+  pre_post_results[[name]] <- model_pre_post
+  
+  
+  model_pre_during_post <- feglm(
+    log_tot_spend ~ pre + post_prep + post_during + post_recovery,
+    data = df_temp,
+    fixef = c("new_id", "local_txn_date"),
+    cluster = c('zip_code','local_txn_date'),
+    mem.clean=TRUE
+  )
+  
+  pre_during_post_results[[name]] <- model_pre_during_post
+  
+  
+}
+
+#### public assistance 
+df_data_proc_f <- df_data_proc %>%
+  left_join(df_county %>% 
+              select(storm_name_fx,zip_code,group=obligated_infra) %>% 
+              unique() %>%
+              mutate(
+                group = ifelse(group>0,1,0)
+              )) %>%
+  mutate(
+    group_cat = case_when(
+      (is.na(group) & inside_polygon=='NULL') ~ '0',
+      (is.na(group) & inside_polygon=='affected') ~ '2',
+      TRUE ~ as.character(group)
+    ),
+    group = case_when(
+      (is.na(group) & inside_polygon=='affected') ~ 2,
+      TRUE ~ group
+    ),
+    dist = case_when(
+      is.na(group) ~ 0,
+      (!is.na(group) & (inside_polygon!='NULL')) ~ dist,
+      TRUE ~ dist_all_proc
+    ),
+    group_cat = as.character(group_cat),
+    group = case_when(
+      group == 0 ~ 'low_obl_infra',
+      group == 1 ~ 'high_obl_infra',
+      group == 2 ~ 'none'
+    )
+  ) 
+
+i <- 'affected'
+for (i in c('low_obl_infra','high_obl_infra','none')){
+  
+  name <- paste(i)
+  
+  print(name)
+  
+  df_temp <- df_data_proc_f %>%
+    filter(
+      group %in% c(NA,i)
+    )
+  
+  model_pre_post <- feglm(
+    log_tot_spend ~  pre_base + post_base,
+    data = df_temp,
+    fixef = c("new_id", "local_txn_date"),
+    cluster = c('zip_code','local_txn_date'),
+    mem.clean=TRUE
+  )
+  
+  pre_post_results[[name]] <- model_pre_post
+  
+  
+  model_pre_during_post <- feglm(
+    log_tot_spend ~ pre + post_prep + post_during + post_recovery,
+    data = df_temp,
+    fixef = c("new_id", "local_txn_date"),
+    cluster = c('zip_code','local_txn_date'),
+    mem.clean=TRUE
+  )
+  
+  pre_during_post_results[[name]] <- model_pre_during_post
+  
+  
+}
+
+#### power outage
+df_data_proc_f <- df_data_proc %>%
+  left_join(df_county %>% 
+              select(storm_name_fx,zip_code,group=severe_outage) %>% 
+              unique() %>%
+              mutate(
+                group = ifelse(group>0,'high_outage','low_outage')
+              )) %>%
+  mutate(
+    group_cat = case_when(
+      (is.na(group) & inside_polygon=='NULL') ~ '0',
+      (is.na(group) & inside_polygon=='affected') ~ 'low_outage',
+      TRUE ~ group
+    ),
+    group = case_when(
+      (is.na(group) & inside_polygon=='affected') ~ 'low_outage',
+      TRUE ~ group
+    ),
+    dist = case_when(
+      is.na(group) ~ 0,
+      (!is.na(group) & (inside_polygon!='NULL')) ~ dist,
+      TRUE ~ dist_all_proc
+    ),
+    group_cat = as.character(group_cat)
+  ) 
+
+
+for (i in c("low_outage",'high_outage')){
+  
+  name <- paste(i)
+  
+  print(name)
+  
+  df_temp <- df_data_proc_f %>%
+    filter(
+      group %in% c(NA,i)
+    )
+  
+  model_pre_post <- feglm(
+    log_tot_spend ~  pre_base + post_base,
+    data = df_temp,
+    fixef = c("new_id", "local_txn_date"),
+    cluster = c('zip_code','local_txn_date'),
+    mem.clean=TRUE
+  )
+  
+  pre_post_results[[name]] <- model_pre_post
+  
+  
+  model_pre_during_post <- feglm(
+    log_tot_spend ~ pre + post_prep + post_during + post_recovery,
+    data = df_temp,
+    fixef = c("new_id", "local_txn_date"),
+    cluster = c('zip_code','local_txn_date'),
+    mem.clean=TRUE
+  )
+  
+  pre_during_post_results[[name]] <- model_pre_during_post
+  
+  
+}
+
+
+
+df_damage <- readxl::read_excel('FEMA_damage-old.xls') %>%
+  mutate(
+    storm_name_fx = paste('hurricane',str_to_lower(hurricane_name),sep='_')
+  ) %>%
+  #group_by(storm_name_fx) %>%
+  arrange(damage_rate) %>%
+  mutate(
+    group = ntile(damage_rate,n=2)+1,
+    zip_code = as.numeric(zip_code)
+  ) %>%
+  ungroup() %>%
+  select(storm_name_fx,group,zip_code,damage_rate)
+
+df_data_proc_f <- df_data_proc %>%
+  left_join(df_damage) %>%
+  mutate(
+    group_cat = case_when(
+      (is.na(group) & inside_polygon=='NULL') ~ 0,
+      (is.na(group) & inside_polygon=='affected') ~ 1,
+      TRUE ~ group
+    ),
+    group = case_when(
+      (is.na(group) & inside_polygon=='affected') ~ 1,
+      TRUE ~ group
+    ),
+    dist = case_when(
+      is.na(group) ~ 0,
+      (!is.na(group) & (inside_polygon!='NULL')) ~ dist,
+      TRUE ~ dist_all_proc
+    ),
+    group_cat = as.character(group_cat),
+    damage_rate_2 = ifelse(
+      is.na(damage_rate),0,damage_rate
+    )
+  ) 
+
+etable(
+  pre_post_results, 
+  tex=F,
+  se.below = TRUE,
+  fitstat = c("n"),
+  dict = c(pre_base = "Pre-hurricane",
+           post_base = 'Post-hurricane',
+           new_id = 'Zip-Code FE',
+           local_txn_date = 'Time FE',
+           zip_code = 'Merchant Zip'),
+  file = 'results//AR4-tot-county_mecha.txt'
+)
+
 
 
 # Table A3 ----------------------------------------------------------------
